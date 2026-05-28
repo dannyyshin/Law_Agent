@@ -10,7 +10,7 @@ from mcp.client.stdio import stdio_client
 
 # 1. 환경변수 로드 및 제미나이 설정
 load_dotenv(override=True)
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "AIzaSyC70I6uDuPrUn6xLM1B4MRl1SoffLpx02Q")
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 genai.configure(api_key=GEMINI_API_KEY)
 
 # 1-1. UI/UX 개선을 위한 커스텀 CSS 주입
