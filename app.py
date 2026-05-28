@@ -195,10 +195,27 @@ qa_instruction = (
 qa_model = genai.GenerativeModel(model_name=model_name, system_instruction=qa_instruction)
 
 
-# 6. 채팅 기록 처리 (임시 메모리 저장)
+# 6. 채팅 기록 처리 (Dropbox 연동)
+def load_dropbox_history(folder_name):
+    try:
+        _, res = dbx.files_download(f"/{folder_name}/history.json")
+        return json.loads(res.content.decode('utf-8'))
+    except dropbox.exceptions.ApiError:
+        return []
+    except Exception as e:
+        print(f"히스토리 로드 오류: {e}")
+        return []
+
+def save_dropbox_history(folder_name, messages):
+    try:
+        data = json.dumps(messages, ensure_ascii=False, indent=2).encode('utf-8')
+        dbx.files_upload(data, f"/{folder_name}/history.json", mode=dropbox.files.WriteMode("overwrite"))
+    except Exception as e:
+        print(f"히스토리 저장 오류: {e}")
+
 if "current_room" not in st.session_state or st.session_state.current_room != selected_folder:
     st.session_state.current_room = selected_folder
-    st.session_state.messages = []
+    st.session_state.messages = load_dropbox_history(selected_folder)
 
 user_avatar = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Ctext x='12' y='18' font-size='20' text-anchor='middle' fill='white'%3E%E2%9D%94%3C/text%3E%3C/svg%3E"
 
@@ -265,6 +282,7 @@ col1, col2 = st.columns([8, 2])
 with col2:
     if st.button("🧹 대화 비우기", use_container_width=True):
         st.session_state.messages = []
+        save_dropbox_history(selected_folder, st.session_state.messages)
         st.rerun()
 
 prompt = st.chat_input("법률 관련 질문을 입력하세요...")
@@ -288,3 +306,4 @@ if prompt:
         final_answer = stream_qa(user_text, draft, law_data, response_placeholder)
             
     st.session_state.messages.append({"role": "assistant", "content": final_answer})
+    save_dropbox_history(selected_folder, st.session_state.messages)
