@@ -2,3 +2,5 @@ streamlit
 google-generativeai
 pymupdf
 python-dotenv
+dropbox
+mcp
