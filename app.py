@@ -34,21 +34,14 @@ if not st.session_state.logged_in:
             st.error("비밀번호가 일치하지 않습니다.")
     st.stop()
 
-# 1-1. UI/UX 개선을 위한 커스텀 CSS 주입 (Google Labs Design System)
+# 1-1. UI/UX 개선을 위한 커스텀 CSS 주입 (Google Labs Design System - Premium Dark)
 custom_css = """
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;500;700&family=Space+Grotesk:wght@500;700&display=swap');
 
-/* 전체 배경 및 폰트 설정 (Architectural Minimalism) */
-[data-testid="stAppViewContainer"] {
-    background-color: #F7F5F2 !important; /* Warm limestone */
-    color: #1A1C1E !important; /* Deep ink */
-}
+/* 전체 폰트 설정 (Architectural Minimalism) */
 * {
     font-family: 'Public Sans', sans-serif !important;
-}
-h1, h2, h3, h4, h5, h6 {
-    color: #1A1C1E !important;
 }
 
 /* 텍스트 디테일 */
@@ -58,19 +51,16 @@ p, li, span, div.stMarkdown { font-size: 1rem !important; line-height: 1.6; }
 @media (min-width: 768px) {
     [data-testid="stSidebar"] { min-width: 400px !important; max-width: 400px !important; }
 }
-[data-testid="stSidebar"] {
-    background-color: #EAE6DF !important; /* Slightly darker limestone for contrast */
-}
 
-/* 채팅 말풍선 UI 스타일링 */
+/* 채팅 말풍선 UI 스타일링 (다크 테마) */
 [data-testid="stChatMessage"] { margin-bottom: 1.5rem !important; }
 /* 사용자 채팅 (질문) */
 [data-testid="stChatMessage"]:has(img) { 
-    background-color: #FFFFFF !important; 
-    border: 1px solid #D5D1CB !important; 
+    background-color: #1E1E1E !important; 
+    border: 1px solid #333333 !important; 
     border-radius: 8px !important; 
     padding: 1.2rem 1.5rem !important; 
-    box-shadow: 0 2px 5px rgba(0,0,0,0.03);
+    box-shadow: 0 2px 5px rgba(0,0,0,0.2);
 }
 /* AI 채팅 (답변) */
 [data-testid="stChatMessage"]:not(:has(img)) { 
@@ -79,17 +69,17 @@ p, li, span, div.stMarkdown { font-size: 1rem !important; line-height: 1.6; }
     padding: 1.5rem 0.5rem !important; 
 }
 
-/* 인용구(blockquote) - 변호사/판사 스타일 */
+/* 인용구(blockquote) - 변호사/판사 스타일 (다크 모드) */
 blockquote { 
     border-left: 4px solid #6C7278 !important; /* Slate */
-    background-color: #FFFFFF !important; 
+    background-color: #1A1C1E !important; 
     padding: 15px 20px !important; 
     margin: 15px 0 !important; 
     border-radius: 0 4px 4px 0 !important; 
     font-style: normal !important; 
-    color: #1A1C1E !important; 
+    color: #E0E0E0 !important; 
     font-weight: 500 !important; 
-    box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+    box-shadow: 0 1px 3px rgba(0,0,0,0.3);
 }
 
 /* 버튼 스타일 (Boston Clay 포인트 컬러) */
