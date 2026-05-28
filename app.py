@@ -124,8 +124,8 @@ def get_mcp_tools():
         try:
             async with stdio_client(server_params) as (read, write):
                 async with ClientSession(read, write) as session:
-                    await session.initialize()
-                    tools_resp = await session.list_tools()
+                    await asyncio.wait_for(session.initialize(), timeout=15.0)
+                    tools_resp = await asyncio.wait_for(session.list_tools(), timeout=10.0)
                     
                     def clean_schema(s):
                         if not isinstance(s, dict): return
@@ -159,8 +159,8 @@ async def call_mcp_tool_async(tool_name: str, args: dict):
     server_params = StdioServerParameters(command=mcp_command, args=mcp_args, env=os.environ.copy())
     async with stdio_client(server_params) as (read, write):
         async with ClientSession(read, write) as session:
-            await session.initialize()
-            result = await session.call_tool(tool_name, args)
+            await asyncio.wait_for(session.initialize(), timeout=15.0)
+            result = await asyncio.wait_for(session.call_tool(tool_name, args), timeout=30.0)
             if result.content:
                 return "\n".join([c.text for c in result.content if hasattr(c, 'text')])
             return str(result)
