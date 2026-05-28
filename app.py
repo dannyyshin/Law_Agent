@@ -5,6 +5,7 @@ import fitz  # PyMuPDF
 import google.generativeai as genai
 from dotenv import load_dotenv
 import asyncio
+import threading
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 import dropbox
@@ -147,14 +148,9 @@ def get_mcp_tools():
             print(f"MCP 통신 내부 오류: {e}")
             return []
     try:
-        import nest_asyncio
-        nest_asyncio.apply()
-    except ImportError:
-        pass
-    try:
-        return asyncio.run(fetch_tools())
+        return run_async(fetch_tools())
     except Exception as e:
-        print(f"MCP asyncio 실행 오류: {e}")
+        print(f"MCP 비동기 실행 오류: {e}")
         return []
 
 gemini_functions = get_mcp_tools()
@@ -225,7 +221,7 @@ def execute_researcher(tool_request_parts, placeholder):
                 if fn := part.function_call:
                     called_tool_name = fn.name
                     placeholder.markdown(f"*(🕵️‍♂️ 리서처 에이전트: MCP 실행 중... **{called_tool_name}**)*")
-                    tool_result = asyncio.run(call_mcp_tool_async(called_tool_name, dict(fn.args)))
+                    tool_result = run_async(call_mcp_tool_async(called_tool_name, dict(fn.args)))
                     law_data += f"\n--- {called_tool_name} 결과 ---\n{tool_result}\n"
                     
         if not law_data: law_data = "조회된 법령 데이터가 없습니다."
