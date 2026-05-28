@@ -144,9 +144,18 @@ def get_mcp_tools():
                         gemini_functions.append({"name": t.name, "description": t.description, "parameters": schema})
                     return gemini_functions
         except Exception as e:
-            print(f"MCP 통신 오류: {e}")
+            print(f"MCP 통신 내부 오류: {e}")
             return []
-    return asyncio.run(fetch_tools())
+    try:
+        import nest_asyncio
+        nest_asyncio.apply()
+    except ImportError:
+        pass
+    try:
+        return asyncio.run(fetch_tools())
+    except Exception as e:
+        print(f"MCP asyncio 실행 오류: {e}")
+        return []
 
 gemini_functions = get_mcp_tools()
 
@@ -161,7 +170,7 @@ async def call_mcp_tool_async(tool_name: str, args: dict):
             return str(result)
 
 # 5. Harness 아키텍처: 다중 에이전트 시스템 정의
-model_name = "gemini-3.5-flash"
+model_name = "gemini-1.5-flash"
 
 # Agent 1: 리서처 (도구 호출 전담)
 researcher_instruction = "당신은 법률 리서처입니다. 질문을 분석하여 반드시 법제처 MCP 도구를 호출해 관련 법령 데이터를 수집하세요."
