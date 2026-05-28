@@ -153,8 +153,7 @@ def get_mcp_tools():
         print(f"MCP 비동기 실행 오류: {e}")
         return []
 
-# gemini_functions = get_mcp_tools() # 임시 비활성화 (디버깅)
-gemini_functions = []
+gemini_functions = get_mcp_tools()
 
 async def call_mcp_tool_async(tool_name: str, args: dict):
     server_params = StdioServerParameters(command=mcp_command, args=mcp_args, env=os.environ.copy())
