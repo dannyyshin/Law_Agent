@@ -166,7 +166,7 @@ async def call_mcp_tool_async(tool_name: str, args: dict):
             return str(result)
 
 # 5. Harness 아키텍처: 다중 에이전트 시스템 정의
-model_name = "gemini-1.5-flash"
+model_name = "gemini-3.5-flash"
 
 # Agent 1: 리서처 (도구 호출 전담)
 researcher_instruction = "당신은 법률 리서처입니다. 질문을 분석하여 반드시 법제처 MCP 도구를 호출해 관련 법령 데이터를 수집하세요."
