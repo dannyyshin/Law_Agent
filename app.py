@@ -34,16 +34,83 @@ if not st.session_state.logged_in:
             st.error("비밀번호가 일치하지 않습니다.")
     st.stop()
 
-# 1-1. UI/UX 개선을 위한 커스텀 CSS 주입
+# 1-1. UI/UX 개선을 위한 커스텀 CSS 주입 (Google Labs Design System)
 custom_css = """
 <style>
+@import url('https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;500;700&family=Space+Grotesk:wght@500;700&display=swap');
+
+/* 전체 배경 및 폰트 설정 (Architectural Minimalism) */
+[data-testid="stAppViewContainer"] {
+    background-color: #F7F5F2 !important; /* Warm limestone */
+    color: #1A1C1E !important; /* Deep ink */
+}
+* {
+    font-family: 'Public Sans', sans-serif !important;
+}
+h1, h2, h3, h4, h5, h6 {
+    color: #1A1C1E !important;
+}
+
+/* 텍스트 디테일 */
+p, li, span, div.stMarkdown { font-size: 1rem !important; line-height: 1.6; }
+
+/* 모바일 반응형 사이드바 해결 */
+@media (min-width: 768px) {
+    [data-testid="stSidebar"] { min-width: 400px !important; max-width: 400px !important; }
+}
+[data-testid="stSidebar"] {
+    background-color: #EAE6DF !important; /* Slightly darker limestone for contrast */
+}
+
+/* 채팅 말풍선 UI 스타일링 */
+[data-testid="stChatMessage"] { margin-bottom: 1.5rem !important; }
+/* 사용자 채팅 (질문) */
+[data-testid="stChatMessage"]:has(img) { 
+    background-color: #FFFFFF !important; 
+    border: 1px solid #D5D1CB !important; 
+    border-radius: 8px !important; 
+    padding: 1.2rem 1.5rem !important; 
+    box-shadow: 0 2px 5px rgba(0,0,0,0.03);
+}
+/* AI 채팅 (답변) */
+[data-testid="stChatMessage"]:not(:has(img)) { 
+    background-color: transparent !important; 
+    border: none !important; 
+    padding: 1.5rem 0.5rem !important; 
+}
+
+/* 인용구(blockquote) - 변호사/판사 스타일 */
+blockquote { 
+    border-left: 4px solid #6C7278 !important; /* Slate */
+    background-color: #FFFFFF !important; 
+    padding: 15px 20px !important; 
+    margin: 15px 0 !important; 
+    border-radius: 0 4px 4px 0 !important; 
+    font-style: normal !important; 
+    color: #1A1C1E !important; 
+    font-weight: 500 !important; 
+    box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+}
+
+/* 버튼 스타일 (Boston Clay 포인트 컬러) */
+div.stButton > button:first-child { 
+    background-color: #B8422E !important; 
+    color: #FFFFFF !important; 
+    border: none !important; 
+    border-radius: 4px !important; 
+    font-family: 'Space Grotesk', sans-serif !important;
+    font-weight: 700 !important;
+    transition: background-color 0.2s ease;
+}
+div.stButton > button:first-child:hover {
+    background-color: #8A3122 !important; /* Darker clay */
+}
+div.stButton > button:first-child p {
+    font-family: 'Space Grotesk', sans-serif !important;
+    font-weight: 700 !important;
+}
+
 footer {visibility: hidden !important;}
-[data-testid="stSidebar"] { min-width: 400px !important; max-width: 400px !important; }
-p, li, span, div.stMarkdown { font-size: 0.92rem !important; }
-[data-testid="stChatMessage"] { margin-bottom: 1rem !important; }
-[data-testid="stChatMessage"]:has(img) { background-color: #1A1A1A !important; border: 1px solid #333333 !important; border-radius: 8px !important; padding: 1.2rem 1.5rem !important; }
-[data-testid="stChatMessage"]:not(:has(img)) { background-color: transparent !important; border: none !important; padding: 1.5rem 0.5rem !important; }
-blockquote { border-left: 5px solid #1E88E5 !important; background-color: #ffffff !important; padding: 15px 20px !important; margin: 15px 0 !important; border-radius: 0 8px 8px 0 !important; font-style: normal !important; color: #000000 !important; font-weight: 500 !important; }
 </style>
 """
 st.markdown(custom_css, unsafe_allow_html=True)
