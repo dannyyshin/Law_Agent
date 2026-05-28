@@ -15,6 +15,9 @@ import dropbox
 load_dotenv(override=True)
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 DBX_TOKEN = os.environ.get("DROPBOX_ACCESS_TOKEN", "")
+DBX_APP_KEY = os.environ.get("DROPBOX_APP_KEY", "")
+DBX_APP_SECRET = os.environ.get("DROPBOX_APP_SECRET", "")
+DBX_REFRESH_TOKEN = os.environ.get("DROPBOX_REFRESH_TOKEN", "")
 LOGIN_PASSWORD = os.environ.get("LOGIN_PASSWORD", "1234")
 
 if GEMINI_API_KEY:
@@ -111,9 +114,15 @@ st.sidebar.markdown("### ☁️ Dropbox 사건방 목록")
 
 @st.cache_resource
 def get_dbx():
-    if not DBX_TOKEN:
-        return None
-    return dropbox.Dropbox(DBX_TOKEN)
+    if DBX_REFRESH_TOKEN and DBX_APP_KEY and DBX_APP_SECRET:
+        return dropbox.Dropbox(
+            oauth2_refresh_token=DBX_REFRESH_TOKEN,
+            app_key=DBX_APP_KEY,
+            app_secret=DBX_APP_SECRET
+        )
+    elif DBX_TOKEN:
+        return dropbox.Dropbox(DBX_TOKEN)
+    return None
 
 dbx = get_dbx()
 if not dbx:
