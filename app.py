@@ -2,6 +2,7 @@ import streamlit as st
 import os
 import json
 import fitz  # PyMuPDF
+from PIL import Image
 import google.generativeai as genai
 from dotenv import load_dotenv
 import asyncio
@@ -42,6 +43,10 @@ custom_css = """
 /* 전체 폰트 설정 (Architectural Minimalism) */
 * {
     font-family: 'Public Sans', sans-serif !important;
+}
+/* 아이콘 폰트는 깨지지 않도록 강제 예외 처리 */
+.material-symbols-rounded {
+    font-family: 'Material Symbols Rounded' !important;
 }
 
 /* 텍스트 디테일 */
@@ -304,16 +309,20 @@ def execute_researcher(tool_request_parts, placeholder):
         law_data = f"통신 실패: {str(e)}"
     return called_tool_name, law_data
 
-def execute_analyst(context, user_text, law_data, placeholder):
+def execute_analyst(context, user_request_parts, law_data, placeholder):
     placeholder.markdown("*(👨‍⚖️ 수석 변호사 에이전트: IRAC 법리 분석 초안 작성 중...)*")
-    prompt = f"사용자 질문: {user_text}\n\n[사건 자료]\n{context}\n\n[리서처 수집 법령]\n{law_data}"
+    
+    # 멀티모달 프롬프트 조립
+    prompt_parts = [f"[사건 자료]\n{context}\n\n[리서처 수집 법령]\n{law_data}\n\n사용자 질문 및 첨부 자료:"]
+    prompt_parts.extend(user_request_parts)
+    
     try:
-        draft_response = analyst_model.generate_content(prompt, stream=False)
+        draft_response = analyst_model.generate_content(prompt_parts, stream=False)
         return draft_response.text
     except Exception as e:
         return f"초안 작성 실패: {e}"
 
-def stream_qa(user_text, draft, law_data, placeholder):
+def stream_qa(user_request_parts, draft, law_data, placeholder):
     placeholder.markdown("*(⚖️ QA 판사 에이전트: 팩트체크 및 최종 답변 생성 중...)*")
     
     gemini_history = []
@@ -322,11 +331,13 @@ def stream_qa(user_text, draft, law_data, placeholder):
         gemini_history.append({"role": role, "parts": [msg["content"]]})
         
     chat = qa_model.start_chat(history=gemini_history)
-    qa_prompt = f"사용자 질문: {user_text}\n\n[변호사 초안]\n{draft}\n\n[원본 법령 데이터]\n{law_data}"
+    
+    qa_prompt_parts = [f"[변호사 초안]\n{draft}\n\n[원본 법령 데이터]\n{law_data}\n\n사용자 질문 및 첨부 자료:"]
+    qa_prompt_parts.extend(user_request_parts)
     
     full_response = ""
     try:
-        response = chat.send_message(qa_prompt, stream=True)
+        response = chat.send_message(qa_prompt_parts, stream=True)
         for chunk in response:
             full_response += chunk.text
             placeholder.markdown(full_response + "▌")
@@ -343,25 +354,46 @@ with col2:
         save_dropbox_history(selected_folder, st.session_state.messages)
         st.rerun()
 
-prompt = st.chat_input("법률 관련 질문을 입력하세요...")
+prompt = st.chat_input("법률 관련 질문 및 이미지 캡처를 첨부하세요...", accept_file=True)
 
 if prompt:
-    user_text = prompt
+    user_text = prompt.text if hasattr(prompt, 'text') else prompt
+    attached_files = prompt.files if hasattr(prompt, 'files') else []
+    
+    user_request_parts = []
+    if user_text:
+        user_request_parts.append(user_text)
+        
+    display_images = []
+    for f in attached_files:
+        if f.type.startswith("image"):
+            try:
+                img = Image.open(f)
+                user_request_parts.append(img)
+                display_images.append(img)
+            except Exception as e:
+                st.error(f"이미지 처리 오류: {e}")
+    
+    # UI 출력
     with st.chat_message("user", avatar=user_avatar):
-        st.markdown(user_text)
-    st.session_state.messages.append({"role": "user", "content": user_text})
+        if user_text:
+            st.markdown(user_text)
+        for img in display_images:
+            st.image(img, width=300)
+            
+    st.session_state.messages.append({"role": "user", "content": user_text}) # TODO: History with images (v3)
     
     with st.chat_message("assistant", avatar="🟢"):
         response_placeholder = st.empty()
         
         # 1. Researcher
-        called_tool_name, law_data = execute_researcher([user_text], response_placeholder)
+        called_tool_name, law_data = execute_researcher(user_request_parts, response_placeholder)
         
         # 2. Analyst
-        draft = execute_analyst(context_text, user_text, law_data, response_placeholder)
+        draft = execute_analyst(context_text, user_request_parts, law_data, response_placeholder)
         
         # 3. QA Judge (스트리밍)
-        final_answer = stream_qa(user_text, draft, law_data, response_placeholder)
+        final_answer = stream_qa(user_request_parts, draft, law_data, response_placeholder)
             
     st.session_state.messages.append({"role": "assistant", "content": final_answer})
     save_dropbox_history(selected_folder, st.session_state.messages)
