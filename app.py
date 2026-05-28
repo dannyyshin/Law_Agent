@@ -41,12 +41,8 @@ custom_css = """
 @import url('https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;500;700&family=Space+Grotesk:wght@500;700&display=swap');
 
 /* 전체 폰트 설정 (Architectural Minimalism) */
-* {
+html, body, p, li, h1, h2, h3, h4, h5, h6, blockquote, div.stMarkdown {
     font-family: 'Public Sans', sans-serif !important;
-}
-/* 아이콘 폰트는 깨지지 않도록 강제 예외 처리 */
-.material-symbols-rounded {
-    font-family: 'Material Symbols Rounded' !important;
 }
 
 /* 텍스트 디테일 */
