@@ -7,9 +7,6 @@ from dotenv import load_dotenv
 import asyncio
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
-import nest_asyncio
-
-nest_asyncio.apply()
 
 # 1. 환경변수 로드 및 제미나이 설정
 load_dotenv(override=True)
