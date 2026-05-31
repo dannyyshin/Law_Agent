@@ -7,6 +7,9 @@ from dotenv import load_dotenv
 import asyncio
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
+import nest_asyncio
+
+nest_asyncio.apply()
 
 # 1. 환경변수 로드 및 제미나이 설정
 load_dotenv(override=True)
@@ -203,7 +206,7 @@ if context_text:
 
 tool_instruction = "당신은 사용자의 질문을 분석하여 가장 적합한 법률 검색어를 추출하고, 반드시 법제처 검색 도구를 호출해야 하는 검색 전담 AI입니다."
 
-model_name = "gemini-3.5-flash"
+model_name = "gemini-2.0-flash"
 
 main_model = genai.GenerativeModel(
     model_name=model_name,

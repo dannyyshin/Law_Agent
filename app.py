@@ -10,6 +10,9 @@ import threading
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 import dropbox
+import nest_asyncio
+
+nest_asyncio.apply()
 
 # 1. 환경변수 로드 및 제미나이 설정
 load_dotenv(override=True)
@@ -215,7 +218,7 @@ def get_mcp_tools():
             print(f"MCP 통신 내부 오류: {e}")
             return []
     try:
-        return run_async(fetch_tools())
+        return asyncio.run(fetch_tools())
     except Exception as e:
         print(f"MCP 비동기 실행 오류: {e}")
         return []
@@ -306,7 +309,7 @@ def execute_researcher(tool_request_parts, placeholder):
                 if fn := part.function_call:
                     called_tool_name = fn.name
                     placeholder.markdown(f"*(🕵️‍♂️ 리서처 에이전트: MCP 실행 중... **{called_tool_name}**)*")
-                    tool_result = run_async(call_mcp_tool_async(called_tool_name, dict(fn.args)))
+                    tool_result = asyncio.run(call_mcp_tool_async(called_tool_name, dict(fn.args)))
                     law_data += f"\n--- {called_tool_name} 결과 ---\n{tool_result}\n"
                     
         if not law_data: law_data = "조회된 법령 데이터가 없습니다."
