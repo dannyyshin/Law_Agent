@@ -1,6 +1,7 @@
 import streamlit as st
 import os
 import json
+import re
 import fitz  # PyMuPDF
 from PIL import Image
 import google.generativeai as genai
@@ -10,6 +11,17 @@ import threading
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 import dropbox
+
+def run_async(coro):
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+    if loop and loop.is_running():
+        # Create a new thread to run the event loop
+        with threading.ThreadPoolExecutor() as pool:
+            return pool.submit(asyncio.run, coro).result()
+    return asyncio.run(coro)
 
 # 1. 환경변수 로드 및 제미나이 설정
 load_dotenv(override=True)
@@ -233,13 +245,19 @@ async def call_mcp_tool_async(tool_name: str, args: dict):
             return str(result)
 
 # 5. Harness 아키텍처: 다중 에이전트 시스템 정의
-model_name = "gemini-2.5-flash-lite"
+model_name = "gemini-3.5-flash-lite"
+model_config = genai.types.GenerationConfig(temperature=0.0)
 
 # Agent 1: 리서처 (도구 호출 전담)
-researcher_instruction = "당신은 법률 리서처입니다. 질문을 분석하여 반드시 법제처 MCP 도구를 호출해 관련 법령 데이터를 수집하세요."
+researcher_instruction = (
+    "당신은 법률 리서처입니다. 질문을 분석하여 반드시 법제처 MCP 도구를 호출해 관련 법령 데이터를 수집하세요. "
+    "판례나 과거 사례에 대한 질문이 들어오면 반드시 `search_decisions` 도구를 사용해 실제 판례를 검색하고, "
+    "사건번호가 언급되면 `verify_citations` 도구로 실존 여부를 확인하세요."
+)
 researcher_model = genai.GenerativeModel(
     model_name=model_name,
     system_instruction=researcher_instruction,
+    generation_config=model_config,
     tools=[{"function_declarations": gemini_functions}] if gemini_functions else [],
     tool_config={"function_calling_config": {"mode": "ANY"}} if gemini_functions else None
 )
@@ -247,20 +265,31 @@ researcher_model = genai.GenerativeModel(
 # Agent 2: 수석 변호사 (초안 작성 전담)
 analyst_instruction = (
     "당신은 수석 변호사입니다. 리서처가 수집한 법령 데이터와 사용자의 드롭박스 사건 자료를 종합 분석하여 "
-    "IRAC(쟁점, 규칙, 적용, 결론) 구조로 법리 분석 초안을 작성하세요. "
-    "명확하고 간결한 개조식으로 작성하며, 데이터에 없는 내용은 절대 지어내지 마세요."
+    "사용자의 질문에 직접적으로 부합하는 유연하고 자연스러운 법률 검토 초안을 작성하세요. "
+    "형식(IRAC 등)에 얽매이지 말고 질문의 의도를 파악하여 읽기 쉽게 서술하되, "
+    "제공된 [원본 법령 데이터]나 [사건 자료]에 명시적으로 등장하는 '사건번호'가 아니라면 절대 판례 번호를 임의로 생성하지 마세요. "
+    "관련된 판례 데이터가 없다면 '현재 제공된 데이터에서는 관련 판례를 찾을 수 없습니다'라고 서술하세요."
 )
-analyst_model = genai.GenerativeModel(model_name=model_name, system_instruction=analyst_instruction)
+analyst_model = genai.GenerativeModel(
+    model_name=model_name, 
+    system_instruction=analyst_instruction,
+    generation_config=model_config
+)
 
 # Agent 3: QA 판사 (검증 전담 및 최종 스트리밍 출력)
 qa_instruction = (
     "당신은 엄격한 QA 판사입니다. 수석 변호사가 작성한 초안을 원본 데이터와 교차 검증하세요. "
     "1. 환각(없는 법령이나 사실 지어내기)이 없는지 확인하세요. "
-    "2. 만약 오류가 있다면 수정하여 최종 답변을 내놓고, 오류가 없다면 초안을 바탕으로 완벽한 최종 답변을 출력하세요. "
+    "2. 만약 오류가 있다면 수정하고, 오류가 없다면 초안을 바탕으로 사용자가 이해하기 편한 자연스럽고 유연한 최종 답변을 출력하세요. "
     "3. 답변 서두에 반드시 '본 답변은 📂업로드된 사건 자료와 🔍법률 MCP(법제처 오픈 API) 실시간 검색 결과를 교차 검증하여 작성되었습니다.'라고 명시하세요. "
-    "4. 답변 시 '사건 자료에 따르면~'과 '관련 법령(또는 판례)에 따르면~'을 명확히 구분하여 서술하세요."
+    "4. 사건 자료와 관련 법령(또는 판례)을 적절히 인용하되, 딱딱한 양식을 벗어나 친절하게 답변하세요. "
+    "5. [원본 법령 데이터]나 [사건 자료]에 명시적으로 등장하는 사건번호가 아니라면 모두 삭제하세요."
 )
-qa_model = genai.GenerativeModel(model_name=model_name, system_instruction=qa_instruction)
+qa_model = genai.GenerativeModel(
+    model_name=model_name, 
+    system_instruction=qa_instruction,
+    generation_config=model_config
+)
 
 
 # 6. 채팅 기록 처리 (Dropbox 연동)
@@ -293,13 +322,20 @@ for msg in st.session_state.messages:
         st.markdown(msg["content"])
 
 # 7. 실행 로직
-def execute_researcher(tool_request_parts, placeholder):
+def execute_researcher(user_request_parts, placeholder):
     placeholder.markdown("*(🕵️‍♂️ 리서처 에이전트: 법률 데이터 검색 중...)*")
     law_data = ""
     called_tool_name = None
+    
+    # 리서처도 대화 문맥(최근 6개)을 알 수 있도록 히스토리 주입
+    gemini_history = []
+    for msg in st.session_state.messages[-6:-1] if len(st.session_state.messages) > 1 else []:
+        role = "user" if msg["role"] == "user" else "model"
+        gemini_history.append({"role": role, "parts": [msg["content"]]})
+        
     try:
-        tool_chat = researcher_model.start_chat()
-        tool_res = tool_chat.send_message(tool_request_parts, stream=False)
+        tool_chat = researcher_model.start_chat(history=gemini_history)
+        tool_res = tool_chat.send_message(user_request_parts, stream=False)
         
         if tool_res.candidates and tool_res.candidates[0].content.parts:
             for part in tool_res.candidates[0].content.parts:
@@ -331,7 +367,9 @@ def stream_qa(user_request_parts, draft, law_data, placeholder):
     placeholder.markdown("*(⚖️ QA 판사 에이전트: 팩트체크 및 최종 답변 생성 중...)*")
     
     gemini_history = []
-    for msg in st.session_state.messages[:-1]:
+    # 최근 10개 대화만 컨텍스트로 유지하여 토큰 최적화
+    recent_messages = st.session_state.messages[-10:-1] if len(st.session_state.messages) > 1 else []
+    for msg in recent_messages:
         role = "user" if msg["role"] == "user" else "model"
         gemini_history.append({"role": role, "parts": [msg["content"]]})
         
@@ -396,6 +434,16 @@ if prompt:
         
         # 2. Analyst
         draft = execute_analyst(context_text, user_request_parts, law_data, response_placeholder)
+        
+        # 2.5. 크로스체크 전담 파이프라인 (정규식 기반 팩트체크)
+        found_case_numbers = re.findall(r'(대법원|헌법재판소|고등법원|특허법원|지방법원).*?([0-9]{4}[가-힣]{1,2}[0-9]+)', draft)
+        warnings = []
+        for court, num in found_case_numbers:
+            if num not in law_data and num not in context_text:
+                warnings.append(f"주의: 초안에 언급된 사건번호 '{court} {num}'는 원본 데이터에 존재하지 않습니다. 할루시네이션일 확률이 높으니 반드시 삭제하세요.")
+        if warnings:
+            warning_msg = "\n".join(warnings)
+            draft += f"\n\n[시스템 경고 - QA 검증 시 참고할 것]\n{warning_msg}"
         
         # 3. QA Judge (스트리밍)
         final_answer = stream_qa(user_request_parts, draft, law_data, response_placeholder)
