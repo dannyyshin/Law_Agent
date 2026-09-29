@@ -245,7 +245,7 @@ async def call_mcp_tool_async(tool_name: str, args: dict):
             return str(result)
 
 # 5. Harness 아키텍처: 다중 에이전트 시스템 정의
-model_name = "gemini-3.5-flash-lite"
+model_name = "gemini-3.8-flash"
 model_config = genai.types.GenerationConfig(temperature=0.0)
 
 # Agent 1: 리서처 (도구 호출 전담)
