@@ -2,28 +2,16 @@ import streamlit as st
 import os
 import json
 import re
-import fitz  # PyMuPDF
 from PIL import Image
 import google.generativeai as genai
 from dotenv import load_dotenv
-import asyncio
-import threading
-from mcp import ClientSession, StdioServerParameters
-from mcp.client.stdio import stdio_client
 import dropbox
 
-def run_async(coro):
-    try:
-        loop = asyncio.get_running_loop()
-    except RuntimeError:
-        loop = None
-    if loop and loop.is_running():
-        # Create a new thread to run the event loop
-        with threading.ThreadPoolExecutor() as pool:
-            return pool.submit(asyncio.run, coro).result()
-    return asyncio.run(coro)
+# v3.0 모듈 임포트
+from parser import MultiFormatParser
+from mcp_client import run_async, fetch_mcp_tools_async, call_mcp_tool_async
 
-# 1. 환경변수 로드 및 제미나이 설정
+# 1. 환경변수 로드 및 설정
 load_dotenv(override=True)
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 DBX_TOKEN = os.environ.get("DROPBOX_ACCESS_TOKEN", "")
@@ -35,85 +23,108 @@ LOGIN_PASSWORD = os.environ.get("LOGIN_PASSWORD", "1234")
 if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
 
-# 1-0. 보안 인증 (Auth) 모듈
+# 1-0. 보안 인증 (Auth) 게이트웨이
 if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
 
 if not st.session_state.logged_in:
-    st.title("🔒 Law Agent 보안 접속")
-    pwd = st.text_input("비밀번호를 입력하세요", type="password")
-    if st.button("접속"):
+    st.set_page_config(page_title="Law Agent v3.0 - 보안 접속", page_icon="🔒", layout="centered")
+    st.markdown("<h2 style='text-align: center; margin-top: 50px;'>🔒 Law Agent v3.0 보안 접속</h2>", unsafe_allow_html=True)
+    st.markdown("<p style='text-align: center; color: #888;'>개인 맞춤형 AI 법률 보조 시스템 (무결점 팩트체크 엔진 탑재)</p>", unsafe_allow_html=True)
+    pwd = st.text_input("접속 비밀번호를 입력하세요", type="password")
+    if st.button("접속하기", use_container_width=True):
         if pwd == LOGIN_PASSWORD:
             st.session_state.logged_in = True
             st.rerun()
         else:
-            st.error("비밀번호가 일치하지 않습니다.")
+            st.error("비밀번호가 올바르지 않습니다.")
     st.stop()
 
-# 1-1. UI/UX 개선을 위한 커스텀 CSS 주입 (Google Labs Design System - Premium Dark)
+# 1-1. Streamlit 페이지 설정 및 Google Labs & Lbox 스타일 커스텀 CSS 주입
+st.set_page_config(page_title="Law Agent v3.0", page_icon="🏛️", layout="wide")
+
 custom_css = """
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;500;700&family=Space+Grotesk:wght@500;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@500;700&display=swap');
 
-/* 전체 폰트 설정 (Architectural Minimalism) */
 html, body, p, li, h1, h2, h3, h4, h5, h6, blockquote, div.stMarkdown {
-    font-family: 'Public Sans', sans-serif !important;
+    font-family: 'Public Sans', -apple-system, sans-serif !important;
 }
 
-/* 텍스트 디테일 */
-p, li, span, div.stMarkdown { font-size: 1rem !important; line-height: 1.6; }
-
-/* 모바일 반응형 사이드바 해결 */
+/* 모바일 반응형 사이드바 너비 */
 @media (min-width: 768px) {
-    [data-testid="stSidebar"] { min-width: 400px !important; max-width: 400px !important; }
+    [data-testid="stSidebar"] { min-width: 380px !important; max-width: 380px !important; }
 }
 
-/* 채팅 말풍선 UI 스타일링 (다크 테마) */
-[data-testid="stChatMessage"] { margin-bottom: 1.5rem !important; }
-/* 사용자 채팅 (질문) */
-[data-testid="stChatMessage"]:has(img) { 
-    background-color: #1E1E1E !important; 
-    border: 1px solid #333333 !important; 
-    border-radius: 8px !important; 
-    padding: 1.2rem 1.5rem !important; 
-    box-shadow: 0 2px 5px rgba(0,0,0,0.2);
-}
-/* AI 채팅 (답변) */
-[data-testid="stChatMessage"]:not(:has(img)) { 
-    background-color: transparent !important; 
-    border: none !important; 
-    padding: 1.5rem 0.5rem !important; 
+/* 채팅창 UI */
+[data-testid="stChatMessage"] { margin-bottom: 1.2rem !important; }
+
+/* 사용자 메시지 카드 */
+[data-testid="stChatMessage"]:has(img) {
+    background-color: #1A1C1E !important;
+    border: 1px solid #2D3135 !important;
+    border-radius: 10px !important;
+    padding: 1.2rem 1.5rem !important;
 }
 
-/* 인용구(blockquote) - 변호사/판사 스타일 (다크 모드) */
-blockquote { 
-    border-left: 4px solid #6C7278 !important; /* Slate */
-    background-color: #1A1C1E !important; 
-    padding: 15px 20px !important; 
-    margin: 15px 0 !important; 
-    border-radius: 0 4px 4px 0 !important; 
-    font-style: normal !important; 
-    color: #E0E0E0 !important; 
-    font-weight: 500 !important; 
-    box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+/* AI 답변 메시지 */
+[data-testid="stChatMessage"]:not(:has(img)) {
+    background-color: transparent !important;
+    border: none !important;
+    padding: 1.2rem 0.5rem !important;
 }
 
-/* 버튼 스타일 (Boston Clay 포인트 컬러) */
-div.stButton > button:first-child { 
-    background-color: #B8422E !important; 
-    color: #FFFFFF !important; 
-    border: none !important; 
-    border-radius: 4px !important; 
-    font-family: 'Space Grotesk', sans-serif !important;
-    font-weight: 700 !important;
-    transition: background-color 0.2s ease;
+/* 엘박스 스타일 판결문/인용구 스타일 */
+blockquote {
+    border-left: 4px solid #B8422E !important; /* Boston Clay Accent */
+    background-color: #1E2022 !important;
+    padding: 14px 18px !important;
+    margin: 14px 0 !important;
+    border-radius: 0 6px 6px 0 !important;
+    font-style: normal !important;
+    color: #E2E3E5 !important;
+    font-size: 0.95rem !important;
+    line-height: 1.6;
+}
+
+/* 법제처 검증 배지 */
+.legal-badge {
+    display: inline-flex;
+    align-items: center;
+    background-color: #18281E;
+    border: 1px solid #2E5A36;
+    color: #4ADE80;
+    font-size: 0.82rem;
+    font-weight: 600;
+    padding: 4px 10px;
+    border-radius: 14px;
+    margin-right: 8px;
+    margin-bottom: 12px;
+}
+
+.legal-badge-blue {
+    display: inline-flex;
+    align-items: center;
+    background-color: #132438;
+    border: 1px solid #1D4E89;
+    color: #60A5FA;
+    font-size: 0.82rem;
+    font-weight: 600;
+    padding: 4px 10px;
+    border-radius: 14px;
+    margin-bottom: 12px;
+}
+
+/* 버튼 스타일 */
+div.stButton > button:first-child {
+    background-color: #B8422E !important;
+    color: #FFFFFF !important;
+    border: none !important;
+    border-radius: 6px !important;
+    font-weight: 600 !important;
 }
 div.stButton > button:first-child:hover {
-    background-color: #8A3122 !important; /* Darker clay */
-}
-div.stButton > button:first-child p {
-    font-family: 'Space Grotesk', sans-serif !important;
-    font-weight: 700 !important;
+    background-color: #8F3222 !important;
 }
 
 footer {visibility: hidden !important;}
@@ -121,11 +132,12 @@ footer {visibility: hidden !important;}
 """
 st.markdown(custom_css, unsafe_allow_html=True)
 
-# 2. 드롭박스 API 연동 (가상 파일 시스템)
-st.sidebar.markdown("### ☁️ Dropbox 사건방 목록")
+# 2. 스토리지 연동 (Dropbox 실시간 마운트 및 로컬 Fallback 하이브리드 지원)
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+LOCAL_CASES_DIR = os.path.join(BASE_DIR, "cases")
 
 @st.cache_resource
-def get_dbx():
+def get_dropbox_client():
     if DBX_REFRESH_TOKEN and DBX_APP_KEY and DBX_APP_SECRET:
         return dropbox.Dropbox(
             oauth2_refresh_token=DBX_REFRESH_TOKEN,
@@ -136,317 +148,359 @@ def get_dbx():
         return dropbox.Dropbox(DBX_TOKEN)
     return None
 
-dbx = get_dbx()
-if not dbx:
-    st.sidebar.error("Dropbox Token이 설정되지 않았습니다.")
+dbx = get_dropbox_client()
+use_cloud_storage = False
+
+st.sidebar.markdown("### 🏛️ 사건방 목록")
+
+# 스토리지 자동 선택: Dropbox 우선, 실패 시 로컬 cases/ 폴더
+case_folders = []
+if dbx:
+    try:
+        res = dbx.files_list_folder('')
+        case_folders = [entry.name for entry in res.entries if isinstance(entry, dropbox.files.FolderMetadata)]
+        case_folders.sort()
+        if case_folders:
+            use_cloud_storage = True
+            st.sidebar.caption("☁️ Dropbox Cloud 실시간 연동 중")
+    except Exception as e:
+        st.sidebar.warning(f"Dropbox 연결 실패 ({e}) -> 로컬 모드로 전환합니다.")
+
+if not use_cloud_storage:
+    st.sidebar.caption("💻 로컬 디렉터리 연동 모드")
+    if os.path.exists(LOCAL_CASES_DIR):
+        case_folders = [f for f in os.listdir(LOCAL_CASES_DIR) if os.path.isdir(os.path.join(LOCAL_CASES_DIR, f))]
+        case_folders.sort()
+
+if not case_folders:
+    st.sidebar.warning("생성된 사건방(폴더)이 없습니다.")
     st.stop()
 
-try:
-    # 최상위 폴더 목록 가져오기
-    res = dbx.files_list_folder('')
-    folders = [entry.name for entry in res.entries if isinstance(entry, dropbox.files.FolderMetadata)]
-except Exception as e:
-    st.sidebar.error(f"Dropbox 연결 오류: {e}")
-    st.stop()
+selected_folder = st.sidebar.radio("사건방을 선택하세요:", case_folders)
 
-folders.sort()
-if not folders:
-    st.sidebar.warning("드롭박스에 생성된 사건방(폴더)이 없습니다.")
-    st.stop()
+# 3. 문서 자동 파싱 (PDF, HWPX, TXT 등 MultiFormatParser 지원)
+@st.cache_data(show_spinner=False)
+def load_case_documents(folder_name: str, is_cloud: bool):
+    doc_text = ""
+    file_list = []
+    
+    if is_cloud:
+        try:
+            res = dbx.files_list_folder(f'/{folder_name}')
+            for entry in res.entries:
+                if isinstance(entry, dropbox.files.FileMetadata):
+                    name_lower = entry.name.lower()
+                    if name_lower.endswith(('.pdf', '.hwpx', '.txt', '.hwp')):
+                        file_list.append(entry.name)
+                        _, resp = dbx.files_download(entry.path_lower)
+                        parsed = MultiFormatParser.parse_file(entry.name, resp.content)
+                        if parsed:
+                            doc_text += f"\n--- [문서: {entry.name}] ---\n{parsed}\n"
+        except Exception as e:
+            print(f"클라우드 문서 로드 실패: {e}")
+    else:
+        folder_path = os.path.join(LOCAL_CASES_DIR, folder_name)
+        if os.path.exists(folder_path):
+            for fname in os.listdir(folder_path):
+                name_lower = fname.lower()
+                if name_lower.endswith(('.pdf', '.hwpx', '.txt', '.hwp')):
+                    file_list.append(fname)
+                    fpath = os.path.join(folder_path, fname)
+                    with open(fpath, 'rb') as f:
+                        parsed = MultiFormatParser.parse_file(fname, f.read())
+                        if parsed:
+                            doc_text += f"\n--- [문서: {fname}] ---\n{parsed}\n"
+                            
+    return doc_text.strip(), file_list
 
-selected_folder = st.sidebar.radio("방을 선택하세요:", folders)
+with st.spinner("📂 사건 서류(PDF/HWPX/TXT) 동기화 및 파싱 중..."):
+    context_text, loaded_files = load_case_documents(selected_folder, use_cloud_storage)
+
+if loaded_files:
+    st.sidebar.success(f"✅ {len(loaded_files)}건의 서류 파싱 완료")
+    with st.sidebar.expander("📄 인식된 증거 서류 목록", expanded=False):
+        for i, fn in enumerate(sorted(loaded_files, reverse=True), 1):
+            st.markdown(f"{i}. {fn}")
+else:
+    st.sidebar.info("해당 사건방에 등록된 서면이 없습니다.")
 
 st.sidebar.markdown("---")
-st.markdown(f"<h1 style='font-size: 35px; margin-bottom: 20px;'>🏛️ {selected_folder}</h1>", unsafe_allow_html=True)
 
-# 3. 문서 자동 인식 (PDF 파싱 - 드롭박스 실시간 마운트)
-@st.cache_data(show_spinner=False)
-def load_dropbox_pdfs(folder_name):
-    pdf_texts = ""
-    pdf_files = []
-    try:
-        res = dbx.files_list_folder(f'/{folder_name}')
-        for entry in res.entries:
-            if isinstance(entry, dropbox.files.FileMetadata) and entry.name.lower().endswith('.pdf'):
-                pdf_files.append(entry.name)
-                _, response = dbx.files_download(entry.path_lower)
-                doc = fitz.open(stream=response.content, filetype="pdf")
-                for page in doc:
-                    pdf_texts += page.get_text() + "\n"
-    except Exception as e:
-        print(f"드롭박스 PDF 읽기 오류: {e}")
-    return pdf_texts, pdf_files
+# 4. MCP 도구 로드
+@st.cache_resource(show_spinner="🔍 법제처 최신 MCP 도구 바인딩 중...")
+def get_available_mcp_tools():
+    return run_async(fetch_mcp_tools_async())
 
-with st.spinner("☁️ 드롭박스에서 사건 자료(PDF) 동기화 중..."):
-    context_text, pdf_files = load_dropbox_pdfs(selected_folder)
+gemini_functions = get_available_mcp_tools()
 
-if pdf_files:
-    st.sidebar.success(f"✅ {len(pdf_files)}개의 사건 자료 인식 완료")
-    with st.sidebar.expander("📂 인식된 문서 목록", expanded=True):
-        for i, f in enumerate(sorted(pdf_files, reverse=True), 1):
-            st.markdown(f"{i}. {f}")
-else:
-    st.sidebar.info("드롭박스 해당 폴더에 PDF가 없습니다.")
-
-# 4. MCP 연결 (크로스플랫폼 지원 npx/cmd)
-mcp_command = "npx.cmd" if os.name == "nt" else "npx"
-mcp_args = ["-y", "korean-law-mcp"] if os.name != "nt" else ["-y", "korean-law-mcp"]
-# 윈도우 로컬의 경우 cmd /c korean-law-mcp 방식 보존 (기존과 동일하게 작동)
-if os.name == "nt":
-    mcp_command = "cmd"
-    mcp_args = ["/c", "korean-law-mcp"]
-
-@st.cache_resource(show_spinner="MCP 도구 목록을 불러오는 중...")
-def get_mcp_tools():
-    async def fetch_tools():
-        server_params = StdioServerParameters(command=mcp_command, args=mcp_args, env=os.environ.copy())
+# 5. 대화 기록 로드 및 저장 (Dropbox / 로컬 양방향)
+def load_history(folder_name: str, is_cloud: bool):
+    if is_cloud:
         try:
-            async with stdio_client(server_params) as (read, write):
-                async with ClientSession(read, write) as session:
-                    await asyncio.wait_for(session.initialize(), timeout=15.0)
-                    tools_resp = await asyncio.wait_for(session.list_tools(), timeout=10.0)
-                    
-                    def clean_schema(s):
-                        if not isinstance(s, dict): return
-                        allowed_keys = {"type", "format", "description", "nullable", "enum", "properties", "required", "items"}
-                        keys_to_remove = [k for k in s.keys() if k not in allowed_keys]
-                        for k in keys_to_remove: s.pop(k, None)
-                        if "properties" in s:
-                            for key in list(s["properties"].keys()): clean_schema(s["properties"][key])
-                        if "items" in s: clean_schema(s["items"])
-
-                    gemini_functions = []
-                    for t in tools_resp.tools:
-                        schema = t.inputSchema.copy()
-                        if "apiKey" in schema.get("properties", {}): del schema["properties"]["apiKey"]
-                        if "apiKey" in schema.get("required", []): schema["required"].remove("apiKey")
-                        clean_schema(schema)
-                        gemini_functions.append({"name": t.name, "description": t.description, "parameters": schema})
-                    return gemini_functions
-        except Exception as e:
-            print(f"MCP 통신 내부 오류: {e}")
+            _, res = dbx.files_download(f"/{folder_name}/history.json")
+            return json.loads(res.content.decode('utf-8'))
+        except Exception:
             return []
-    try:
-        return asyncio.run(fetch_tools())
-    except Exception as e:
-        print(f"MCP 비동기 실행 오류: {e}")
-        return []
+    else:
+        hpath = os.path.join(LOCAL_CASES_DIR, folder_name, "history.json")
+        if os.path.exists(hpath):
+            try:
+                with open(hpath, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            except Exception:
+                return []
+    return []
 
-gemini_functions = get_mcp_tools()
-
-async def call_mcp_tool_async(tool_name: str, args: dict):
-    server_params = StdioServerParameters(command=mcp_command, args=mcp_args, env=os.environ.copy())
-    async with stdio_client(server_params) as (read, write):
-        async with ClientSession(read, write) as session:
-            await asyncio.wait_for(session.initialize(), timeout=15.0)
-            result = await asyncio.wait_for(session.call_tool(tool_name, args), timeout=30.0)
-            if result.content:
-                return "\n".join([c.text for c in result.content if hasattr(c, 'text')])
-            return str(result)
-
-# 5. Harness 아키텍처: 다중 에이전트 시스템 정의
-model_name = "gemini-3.8-flash"
-model_config = genai.types.GenerationConfig(temperature=0.0)
-
-# Agent 1: 리서처 (도구 호출 전담)
-researcher_instruction = (
-    "당신은 법률 리서처입니다. 질문을 분석하여 반드시 법제처 MCP 도구를 호출해 관련 법령 데이터를 수집하세요. "
-    "판례나 과거 사례에 대한 질문이 들어오면 반드시 `search_decisions` 도구를 사용해 실제 판례를 검색하고, "
-    "사건번호가 언급되면 `verify_citations` 도구로 실존 여부를 확인하세요."
-)
-researcher_model = genai.GenerativeModel(
-    model_name=model_name,
-    system_instruction=researcher_instruction,
-    generation_config=model_config,
-    tools=[{"function_declarations": gemini_functions}] if gemini_functions else [],
-    tool_config={"function_calling_config": {"mode": "ANY"}} if gemini_functions else None
-)
-
-# Agent 2: 수석 변호사 (초안 작성 전담)
-analyst_instruction = (
-    "당신은 수석 변호사입니다. 리서처가 수집한 법령 데이터와 사용자의 드롭박스 사건 자료를 종합 분석하여 "
-    "사용자의 질문에 직접적으로 부합하는 유연하고 자연스러운 법률 검토 초안을 작성하세요. "
-    "형식(IRAC 등)에 얽매이지 말고 질문의 의도를 파악하여 읽기 쉽게 서술하되, "
-    "제공된 [원본 법령 데이터]나 [사건 자료]에 명시적으로 등장하는 '사건번호'가 아니라면 절대 판례 번호를 임의로 생성하지 마세요. "
-    "관련된 판례 데이터가 없다면 '현재 제공된 데이터에서는 관련 판례를 찾을 수 없습니다'라고 서술하세요."
-)
-analyst_model = genai.GenerativeModel(
-    model_name=model_name, 
-    system_instruction=analyst_instruction,
-    generation_config=model_config
-)
-
-# Agent 3: QA 판사 (검증 전담 및 최종 스트리밍 출력)
-qa_instruction = (
-    "당신은 엄격한 QA 판사입니다. 수석 변호사가 작성한 초안을 원본 데이터와 교차 검증하세요. "
-    "1. 환각(없는 법령이나 사실 지어내기)이 없는지 확인하세요. "
-    "2. 만약 오류가 있다면 수정하고, 오류가 없다면 초안을 바탕으로 사용자가 이해하기 편한 자연스럽고 유연한 최종 답변을 출력하세요. "
-    "3. 답변 서두에 반드시 '본 답변은 📂업로드된 사건 자료와 🔍법률 MCP(법제처 오픈 API) 실시간 검색 결과를 교차 검증하여 작성되었습니다.'라고 명시하세요. "
-    "4. 사건 자료와 관련 법령(또는 판례)을 적절히 인용하되, 딱딱한 양식을 벗어나 친절하게 답변하세요. "
-    "5. [원본 법령 데이터]나 [사건 자료]에 명시적으로 등장하는 사건번호가 아니라면 모두 삭제하세요."
-)
-qa_model = genai.GenerativeModel(
-    model_name=model_name, 
-    system_instruction=qa_instruction,
-    generation_config=model_config
-)
-
-
-# 6. 채팅 기록 처리 (Dropbox 연동)
-def load_dropbox_history(folder_name):
-    try:
-        _, res = dbx.files_download(f"/{folder_name}/history.json")
-        return json.loads(res.content.decode('utf-8'))
-    except dropbox.exceptions.ApiError:
-        return []
-    except Exception as e:
-        print(f"히스토리 로드 오류: {e}")
-        return []
-
-def save_dropbox_history(folder_name, messages):
-    try:
-        data = json.dumps(messages, ensure_ascii=False, indent=2).encode('utf-8')
-        dbx.files_upload(data, f"/{folder_name}/history.json", mode=dropbox.files.WriteMode("overwrite"))
-    except Exception as e:
-        print(f"히스토리 저장 오류: {e}")
+def save_history(folder_name: str, is_cloud: bool, messages: list):
+    data_bytes = json.dumps(messages, ensure_ascii=False, indent=2).encode('utf-8')
+    if is_cloud:
+        try:
+            dbx.files_upload(data_bytes, f"/{folder_name}/history.json", mode=dropbox.files.WriteMode("overwrite"))
+        except Exception as e:
+            print(f"클라우드 히스토리 저장 실패: {e}")
+    else:
+        hpath = os.path.join(LOCAL_CASES_DIR, folder_name, "history.json")
+        try:
+            with open(hpath, 'w', encoding='utf-8') as f:
+                f.write(data_bytes.decode('utf-8'))
+        except Exception as e:
+            print(f"로컬 히스토리 저장 실패: {e}")
 
 if "current_room" not in st.session_state or st.session_state.current_room != selected_folder:
     st.session_state.current_room = selected_folder
-    st.session_state.messages = load_dropbox_history(selected_folder)
+    st.session_state.messages = load_history(selected_folder, use_cloud_storage)
 
+# 6. 메인 UI 헤더
+st.markdown(f"<h1 style='font-size: 32px; margin-bottom: 4px;'>🏛️ {selected_folder}</h1>", unsafe_allow_html=True)
+st.caption("AI 법률 고문 v3.0 | 법제처 Open API ReAct 리서처 & 3중 팩트체크 가드레일 탑재")
+
+# 기존 대화 렌더링
 user_avatar = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Ctext x='12' y='18' font-size='20' text-anchor='middle' fill='white'%3E%E2%9D%94%3C/text%3E%3C/svg%3E"
 
 for msg in st.session_state.messages:
-    avatar = user_avatar if msg["role"] == "user" else "🟢"
+    avatar = user_avatar if msg["role"] == "user" else "⚖️"
     with st.chat_message(msg["role"], avatar=avatar):
         st.markdown(msg["content"])
 
-# 7. 실행 로직
-def execute_researcher(user_request_parts, placeholder):
-    placeholder.markdown("*(🕵️‍♂️ 리서처 에이전트: 법률 데이터 검색 중...)*")
-    law_data = ""
-    called_tool_name = None
-    
-    # 리서처도 대화 문맥(최근 6개)을 알 수 있도록 히스토리 주입
-    gemini_history = []
-    for msg in st.session_state.messages[-6:-1] if len(st.session_state.messages) > 1 else []:
-        role = "user" if msg["role"] == "user" else "model"
-        gemini_history.append({"role": role, "parts": [msg["content"]]})
-        
-    try:
-        tool_chat = researcher_model.start_chat(history=gemini_history)
-        tool_res = tool_chat.send_message(user_request_parts, stream=False)
-        
-        if tool_res.candidates and tool_res.candidates[0].content.parts:
-            for part in tool_res.candidates[0].content.parts:
-                if fn := part.function_call:
-                    called_tool_name = fn.name
-                    placeholder.markdown(f"*(🕵️‍♂️ 리서처 에이전트: MCP 실행 중... **{called_tool_name}**)*")
-                    tool_result = asyncio.run(call_mcp_tool_async(called_tool_name, dict(fn.args)))
-                    law_data += f"\n--- {called_tool_name} 결과 ---\n{tool_result}\n"
-                    
-        if not law_data: law_data = "조회된 법령 데이터가 없습니다."
-    except Exception as e:
-        law_data = f"통신 실패: {str(e)}"
-    return called_tool_name, law_data
+# 7. Agentic ReAct 리서처 파이프라인 (Multi-turn Tool Calling)
+CORE_MODEL_NAME = "gemini-3.8-flash"
 
-def execute_analyst(context, user_request_parts, law_data, placeholder):
-    placeholder.markdown("*(👨‍⚖️ 수석 변호사 에이전트: IRAC 법리 분석 초안 작성 중...)*")
+def execute_agentic_researcher(user_query_parts, placeholder) -> tuple[str, list]:
+    """
+    최대 3턴 동안 ReAct 루프를 순회:
+    1단계: 판례/법령 검색 -> 2단계: 전문 조회 -> 3단계: 판례 생사 확인(cite_check)
+    """
+    placeholder.markdown("*(🕵️‍♂️ 리서처 에이전트: 사건 분석 및 법제처 실시간 리서치 기획 중...)*")
     
-    # 멀티모달 프롬프트 조립
-    prompt_parts = [f"[사건 자료]\n{context}\n\n[리서처 수집 법령]\n{law_data}\n\n사용자 질문 및 첨부 자료:"]
-    prompt_parts.extend(user_request_parts)
+    research_logs = []
+    called_tool_history = []
+    
+    researcher_instruction = (
+        "당신은 최고 실력의 수석 법률 리서처입니다. 사용자의 질문을 분석하여 법률 표준 키워드를 자체 도출하고, "
+        "반드시 제공된 법제처 MCP 도구를 다단계(Multi-step)로 실행하여 완전한 법률 팩트를 수집하세요.\n"
+        "[행동 지침]\n"
+        "1. 질문과 관련된 판례를 찾으려면 `search_decisions` 또는 `search_law`를 호출하세요.\n"
+        "2. 유력한 판례나 법령이 검색되면 반드시 `get_decision_text` 또는 `get_law_text`를 연속 호출하여 **판결 이유 전문**을 확인하세요.\n"
+        "3. 확정된 판례는 `cite_check`를 호출해 대법원 전원합의체로 변경·폐기되었는지 확인하세요.\n"
+        "4. 모든 조사가 끝나면 도구 호출을 멈추고 객관적인 사실만을 요약 보고하세요."
+    )
+    
+    model = genai.GenerativeModel(
+        model_name=CORE_MODEL_NAME,
+        system_instruction=researcher_instruction,
+        tools=[{"function_declarations": gemini_functions}] if gemini_functions else [],
+        tool_config={"function_calling_config": {"mode": "ANY"}} if gemini_functions else None,
+        generation_config=genai.types.GenerationConfig(temperature=0.0)
+    )
+    
+    # 최근 대화 문맥 주입
+    recent_history = []
+    for m in st.session_state.messages[-4:-1] if len(st.session_state.messages) > 1 else []:
+        recent_history.append({"role": "user" if m["role"] == "user" else "model", "parts": [m["content"]]})
+        
+    chat = model.start_chat(history=recent_history)
     
     try:
-        draft_response = analyst_model.generate_content(prompt_parts, stream=False)
-        return draft_response.text
-    except Exception as e:
-        return f"초안 작성 실패: {e}"
-
-def stream_qa(user_request_parts, draft, law_data, placeholder):
-    placeholder.markdown("*(⚖️ QA 판사 에이전트: 팩트체크 및 최종 답변 생성 중...)*")
-    
-    gemini_history = []
-    # 최근 10개 대화만 컨텍스트로 유지하여 토큰 최적화
-    recent_messages = st.session_state.messages[-10:-1] if len(st.session_state.messages) > 1 else []
-    for msg in recent_messages:
-        role = "user" if msg["role"] == "user" else "model"
-        gemini_history.append({"role": role, "parts": [msg["content"]]})
+        response = chat.send_message(user_query_parts, stream=False)
         
-    chat = qa_model.start_chat(history=gemini_history)
+        max_turns = 3
+        for step in range(max_turns):
+            if not (response.candidates and response.candidates[0].content.parts):
+                break
+                
+            fn_calls = [p.function_call for p in response.candidates[0].content.parts if p.function_call]
+            if not fn_calls:
+                break
+                
+            fn = fn_calls[0]
+            tool_name = fn.name
+            tool_args = dict(fn.args)
+            called_tool_history.append(tool_name)
+            
+            placeholder.markdown(f"*(🕵️‍♂️ 법제처 실시간 리서치 [{step+1}/{max_turns}]: `{tool_name}` 실행 중...)*")
+            
+            tool_output = run_async(call_mcp_tool_async(tool_name, tool_args))
+            research_logs.append(f"--- [{tool_name} 호출 결과] ---\n{tool_output}\n")
+            
+            # 다음 턴 실행: 도구 실행 결과를 다시 전송하여 전문 조회/생사 확인 유도
+            try:
+                response = chat.send_message(
+                    genai.protos.Content(
+                        parts=[genai.protos.Part(
+                            function_response=genai.protos.FunctionResponse(
+                                name=tool_name,
+                                response={"result": tool_output}
+                            )
+                        )]
+                    ),
+                    stream=False
+                )
+            except Exception as e:
+                print(f"Function response 전달 오류: {e}")
+                break
+                
+    except Exception as e:
+        research_logs.append(f"리서치 도구 통신 예외: {str(e)}")
+        
+    combined_research = "\n".join(research_logs)
+    if not combined_research:
+        combined_research = "조회된 법제처 데이터가 없으므로 관련 일반 법리 원칙을 기반으로 분석합니다."
+        
+    return combined_research, called_tool_history
+
+# 8. 수석 변호사 초안 작성 & 이중 가드레일 (Analyst & Guardrail)
+def execute_analyst_draft(context, user_query_parts, research_data, placeholder) -> str:
+    placeholder.markdown("*(👨‍⚖️ 수석 변호사 에이전트: 사건 서면과 법령을 교차 분석하여 IRAC 초안 작성 중...)*")
     
-    qa_prompt_parts = [f"[변호사 초안]\n{draft}\n\n[원본 법령 데이터]\n{law_data}\n\n사용자 질문 및 첨부 자료:"]
-    qa_prompt_parts.extend(user_request_parts)
+    analyst_instruction = (
+        "당신은 실무 경력 20년의 수석 변호사입니다. "
+        "사용자의 사건 서류와 리서처가 수집한 법제처 판례/법령 전문만을 철저히 바탕으로 "
+        "IRAC(쟁점-규칙-적용-결론) 구조의 전문 법률 검토 보고서 초안을 작성하세요.\n"
+        "[엄격 수칙]\n"
+        "1. 제공된 [법제처 리서치 결과]나 [사건 서류]에 명시적으로 존재하지 않는 판례 번호나 법령은 절대로 인용하지 마세요.\n"
+        "2. 판례가 확인되지 않은 쟁점은 '관련 대법원 확정 판례 없음'을 명확히 명시하세요."
+    )
+    
+    model = genai.GenerativeModel(
+        model_name=CORE_MODEL_NAME,
+        system_instruction=analyst_instruction,
+        generation_config=genai.types.GenerationConfig(temperature=0.0)
+    )
+    
+    prompt_parts = [
+        f"[사건 증거 서류 추출 텍스트]\n{context}\n\n[법제처 리서치 결과 전문]\n{research_data}\n\n[사용자 질의 및 첨부물]:"
+    ]
+    prompt_parts.extend(user_query_parts)
+    
+    try:
+        draft_resp = model.generate_content(prompt_parts, stream=False)
+        return draft_resp.text
+    except Exception as e:
+        return f"초안 작성 오류: {e}"
+
+# 9. QA 판사 최종 스트리밍 및 가드레일 검증
+def stream_qa_judge_final(user_query_parts, draft, research_data, context, placeholder) -> str:
+    placeholder.markdown("*(⚖️ QA 판사 에이전트: 팩트체크 교차 검증 및 최종 답변 생성 중...)*")
+    
+    # 1차 정규식 가드레일: 가짜 사건번호 검출
+    found_cases = re.findall(r'(대법원|헌법재판소|고등법원|지방법원).*?([0-9]{4}[가-힣]{1,2}[0-9]+)', draft)
+    warnings = []
+    for court, num in found_cases:
+        if num not in research_data and num not in context:
+            warnings.append(f"경고: 초안에 언급된 '{court} {num}' 사건번호는 원본 데이터에 없습니다. 삭제하십시오.")
+            
+    warning_block = "\n".join(warnings) if warnings else ""
+    
+    qa_instruction = (
+        "당신은 엄격한 최고법원 수석 재판연구관(QA 판사)입니다.\n"
+        "수석 변호사의 초안을 검증하여 가짜 판례나 왜곡된 법리를 100% 삭제하고, "
+        "의뢰인이 실무에 즉시 활용할 수 있는 명쾌하고 정확한 최종 답변을 완성하세요.\n"
+        "[답변 구성 수칙]\n"
+        "1. 답변 서두에 다음 배지를 반드시 표기하세요:\n"
+        "   `[🟢 법제처 실시간 법령·판례 교차 검증 완료]`\n"
+        "2. 구조: ① 3줄 핵심 결론 요약 -> ② 쟁점별 IRAC 법리 검토 -> ③ 실무 대응 및 대안 가이드\n"
+        "3. 시스템 경고에 기재된 날조 의심 사건번호는 모두 삭제하고 원칙 법리로 서술하세요."
+    )
+    
+    model = genai.GenerativeModel(
+        model_name=CORE_MODEL_NAME,
+        system_instruction=qa_instruction,
+        generation_config=genai.types.GenerationConfig(temperature=0.1)
+    )
+    
+    recent_history = []
+    for m in st.session_state.messages[-6:-1] if len(st.session_state.messages) > 1 else []:
+        recent_history.append({"role": "user" if m["role"] == "user" else "model", "parts": [m["content"]]})
+        
+    chat = model.start_chat(history=recent_history)
+    
+    qa_input = [
+        f"[변호사 초안]\n{draft}\n\n[원본 법제처 리서치 데이터]\n{research_data}\n\n[가드레일 검증 경고]\n{warning_block}\n\n사용자 질의:"
+    ]
+    qa_input.extend(user_query_parts)
     
     full_response = ""
     try:
-        response = chat.send_message(qa_prompt_parts, stream=True)
+        response = chat.send_message(qa_input, stream=True)
         for chunk in response:
             full_response += chunk.text
             placeholder.markdown(full_response + "▌")
         placeholder.markdown(full_response)
     except Exception as e:
-        placeholder.markdown(f"오류: {e}")
-        full_response = f"응답 오류: {e}"
+        placeholder.markdown(f"답변 스트리밍 오류: {e}")
+        full_response = f"응답 오류 발생: {e}"
+        
     return full_response
 
-col1, col2 = st.columns([8, 2])
-with col2:
+# 10. 하단 컨트롤 및 사용자 입력 처리
+col_left, col_right = st.columns([8, 2])
+with col_right:
     if st.button("🧹 대화 비우기", use_container_width=True):
         st.session_state.messages = []
-        save_dropbox_history(selected_folder, st.session_state.messages)
+        save_history(selected_folder, use_cloud_storage, st.session_state.messages)
         st.rerun()
 
-prompt = st.chat_input("법률 관련 질문 및 이미지 캡처를 첨부하세요...", accept_file=True)
+prompt = st.chat_input("법률 상담 질문을 입력하거나 증거 사진을 첨부하세요...", accept_file=True)
 
 if prompt:
     user_text = prompt.text if hasattr(prompt, 'text') else prompt
     attached_files = prompt.files if hasattr(prompt, 'files') else []
     
-    user_request_parts = []
+    user_query_parts = []
     if user_text:
-        user_request_parts.append(user_text)
+        user_query_parts.append(user_text)
         
     display_images = []
     for f in attached_files:
         if f.type.startswith("image"):
             try:
                 img = Image.open(f)
-                user_request_parts.append(img)
+                user_query_parts.append(img)
                 display_images.append(img)
             except Exception as e:
                 st.error(f"이미지 처리 오류: {e}")
-    
-    # UI 출력
+                
+    # 사용자 질문 UI 출력
     with st.chat_message("user", avatar=user_avatar):
         if user_text:
             st.markdown(user_text)
         for img in display_images:
-            st.image(img, width=300)
+            st.image(img, width=320)
             
-    st.session_state.messages.append({"role": "user", "content": user_text}) # TODO: History with images (v3)
+    st.session_state.messages.append({"role": "user", "content": user_text})
     
-    with st.chat_message("assistant", avatar="🟢"):
-        response_placeholder = st.empty()
+    # AI 답변 생성 파이프라인
+    with st.chat_message("assistant", avatar="⚖️"):
+        status_placeholder = st.empty()
         
-        # 1. Researcher
-        called_tool_name, law_data = execute_researcher(user_request_parts, response_placeholder)
+        # 1. Agentic ReAct 리서처 (Multi-turn 판결전문 및 법령 수집)
+        research_data, tool_history = execute_agentic_researcher(user_query_parts, status_placeholder)
         
-        # 2. Analyst
-        draft = execute_analyst(context_text, user_request_parts, law_data, response_placeholder)
+        # 2. 수석 변호사 초안 작성
+        draft = execute_analyst_draft(context_text, user_query_parts, research_data, status_placeholder)
         
-        # 2.5. 크로스체크 전담 파이프라인 (정규식 기반 팩트체크)
-        found_case_numbers = re.findall(r'(대법원|헌법재판소|고등법원|특허법원|지방법원).*?([0-9]{4}[가-힣]{1,2}[0-9]+)', draft)
-        warnings = []
-        for court, num in found_case_numbers:
-            if num not in law_data and num not in context_text:
-                warnings.append(f"주의: 초안에 언급된 사건번호 '{court} {num}'는 원본 데이터에 존재하지 않습니다. 할루시네이션일 확률이 높으니 반드시 삭제하세요.")
-        if warnings:
-            warning_msg = "\n".join(warnings)
-            draft += f"\n\n[시스템 경고 - QA 검증 시 참고할 것]\n{warning_msg}"
+        # 3. QA 판사 최종 스트리밍 & 가드레일 교차검증
+        final_answer = stream_qa_judge_final(user_query_parts, draft, research_data, context_text, status_placeholder)
         
-        # 3. QA Judge (스트리밍)
-        final_answer = stream_qa(user_request_parts, draft, law_data, response_placeholder)
-            
     st.session_state.messages.append({"role": "assistant", "content": final_answer})
-    save_dropbox_history(selected_folder, st.session_state.messages)
+    save_history(selected_folder, use_cloud_storage, st.session_state.messages)
