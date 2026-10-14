@@ -5,3 +5,4 @@ python-dotenv
 dropbox
 mcp
 nest-asyncio
+python-docx
