@@ -26,8 +26,8 @@ DBX_APP_SECRET = os.environ.get("DROPBOX_APP_SECRET", "")
 DBX_REFRESH_TOKEN = os.environ.get("DROPBOX_REFRESH_TOKEN", "")
 LOGIN_PASSWORD = os.environ.get("LOGIN_PASSWORD", "1234")
 
-# Google Gemini 4 Argon 엔진 명칭 설정
-CORE_MODEL_NAME = "gemini-4-argon"
+# Google Gemini 3.8 Flash 엔진 명칭 설정
+CORE_MODEL_NAME = "gemini-3.8-flash"
 
 if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
@@ -39,7 +39,7 @@ if "logged_in" not in st.session_state:
 if not st.session_state.logged_in:
     st.set_page_config(page_title="Law Agent v4.0 - 보안 접속", page_icon="🔒", layout="centered")
     st.markdown("<h2 style='text-align: center; margin-top: 50px; font-weight: 700; color: #1e293b;'>🔒 Law Agent v4.0 보안 접속</h2>", unsafe_allow_html=True)
-    st.markdown("<p style='text-align: center; color: #64748b; font-size: 14px;'>Google Gemini 4 Argon & 실무 법률 서면·타임라인 워크스페이스</p>", unsafe_allow_html=True)
+    st.markdown("<p style='text-align: center; color: #64748b; font-size: 14px;'>Google Gemini 3.8 Flash & 실무 법률 서면·타임라인 워크스페이스</p>", unsafe_allow_html=True)
     pwd = st.text_input("접속 비밀번호를 입력하세요", type="password")
     if st.button("접속하기", use_container_width=True):
         if pwd == LOGIN_PASSWORD:
@@ -53,7 +53,7 @@ if not st.session_state.logged_in:
 # 1-1. Streamlit 페이지 설정 및 Lbox-스타일 법률 전문 CSS
 # =====================================================================
 st.set_page_config(
-    page_title="Law Agent v4.0 - Gemini 4 Argon 워크스페이스",
+    page_title="Law Agent v4.0 - Gemini 3.8 Flash 워크스페이스",
     page_icon="⚖️",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -122,7 +122,7 @@ blockquote {
     margin-bottom: 8px;
 }
 
-.legal-badge-argon {
+.legal-badge-flash {
     display: inline-flex;
     align-items: center;
     background-color: #e0e7ff;
@@ -176,7 +176,7 @@ st.sidebar.markdown("""
     <span style='background: #1e3a8a; color: white; font-size: 11px; font-weight: 700; padding: 2px 7px; border-radius: 10px;'>v4.0</span>
 </div>
 <div style='font-size: 12px; color: #64748b; margin-bottom: 16px;'>
-    엔진: <strong>Gemini 4 Argon</strong> | 법제처 Open API 연동
+    엔진: <strong>Gemini 3.8 Flash</strong> | 법제처 Open API 연동
 </div>
 """, unsafe_allow_html=True)
 
@@ -317,11 +317,11 @@ st.markdown(f"""
 <div style='display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 12px; flex-wrap: wrap; gap: 8px;'>
     <div>
         <h1 style='font-size: 28px; margin: 0; font-weight: 700; color: #0f172a;'>🏛️ {selected_folder}</h1>
-        <p style='margin: 4px 0 0 0; color: #64748b; font-size: 14px;'>Google Gemini 4 Argon 기반 고지능 법률 의사결정 & 실무 서면 드래프팅 시스템</p>
+        <p style='margin: 4px 0 0 0; color: #64748b; font-size: 14px;'>Google Gemini 3.8 Flash 기반 고지능 법률 의사결정 & 실무 서면 드래프팅 시스템</p>
     </div>
     <div>
         <span class='legal-badge-verified'>🟢 3중 팩트체크 가드레일</span>
-        <span class='legal-badge-argon'>⚡ Gemini 4 Argon</span>
+        <span class='legal-badge-flash'>⚡ Gemini 3.8 Flash</span>
     </div>
 </div>
 """, unsafe_allow_html=True)
@@ -542,7 +542,7 @@ with tab_timeline:
             if len(combined_corpus.strip()) < 50:
                 st.warning("타임라인을 추출할 사건 기록이나 상담 대화가 충분하지 않습니다.")
             else:
-                with st.spinner("Gemini 4 Argon이 사건 기록을 일자별 연대기로 분석 중입니다..."):
+                with st.spinner("Gemini 3.8 Flash가 사건 기록을 일자별 연대기로 분석 중입니다..."):
                     extracted = TimelineEngine.extract_events_from_text(CORE_MODEL_NAME, combined_corpus)
                     if extracted:
                         st.session_state.timeline_events = extracted
@@ -612,7 +612,7 @@ with tab_drafter:
     with d_col2:
         # 서면 생성 트리거
         if submit_draft:
-            with st.spinner(f"Gemini 4 Argon이 정식 '{doc_type}'을 작성 중입니다..."):
+            with st.spinner(f"Gemini 3.8 Flash가 정식 '{doc_type}'을 작성 중입니다..."):
                 combined_facts = f"[사건 서류 추출 본문]\n{context_text}\n\n[추가 사실관계]\n{custom_facts}\n\n[타임라인 데이터]\n{json.dumps(st.session_state.timeline_events, ensure_ascii=False)}"
                 prompt = LegalDrafter.build_draft_prompt(doc_type, combined_facts, "", user_demands)
                 
