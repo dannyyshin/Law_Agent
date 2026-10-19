@@ -8,6 +8,7 @@ from PIL import Image
 import google.generativeai as genai
 from dotenv import load_dotenv
 import dropbox
+import streamlit.components.v1 as components
 
 # v4.0 통합 모듈 임포트
 from parser import MultiFormatParser
@@ -91,8 +92,29 @@ html, body, p, li, h1, h2, h3, h4, h5, h6, blockquote, div.stMarkdown {
     background-color: rgba(30, 58, 138, 0.04);
 }
 
-/* 채팅창 UI */
-[data-testid="stChatMessage"] { margin-bottom: 1.2rem !important; }
+/* 채팅창 UI & 하단 고정 여백 최적화 */
+[data-testid="stChatMessage"] { margin-bottom: 0.8rem !important; }
+
+/* 최하단 입력창 뒤에 대화가 가려지지 않도록 메인 컨테이너 하단 패딩 확보 */
+div.stMainBlockContainer, [data-testid="stChatMessageContainer"] {
+    padding-bottom: 150px !important;
+}
+
+/* 제미나이 스타일 플로팅 하단 입력창 */
+[data-testid="stChatInput"] {
+    border-radius: 14px !important;
+    border: 1px solid #cbd5e1 !important;
+    box-shadow: 0 4px 20px rgba(15, 23, 42, 0.08) !important;
+    background: #ffffff !important;
+    margin-bottom: 10px !important;
+}
+
+/* 대화 액션 버튼 (수정, 재생성, 언도) */
+div[data-testid="stHorizontalBlock"] button {
+    border-radius: 6px !important;
+    font-size: 12.5px !important;
+    padding: 2px 10px !important;
+}
 
 /* 법률 인용문 스타일 */
 blockquote {
@@ -288,8 +310,28 @@ def load_case_json(folder_name: str, is_cloud: bool, filename: str, default_val:
                 return default_val
     return default_val
 
+def make_json_serializable(obj):
+    if isinstance(obj, list):
+        return [make_json_serializable(item) for item in obj]
+    elif isinstance(obj, dict):
+        clean_d = {}
+        for k, v in obj.items():
+            if k == "images":
+                continue # 이미지 바이트/객체는 history.json 저장 제외
+            clean_d[k] = make_json_serializable(v)
+        return clean_d
+    elif hasattr(obj, '__dict__'):
+        return str(obj)
+    return obj
+
 def save_case_json(folder_name: str, is_cloud: bool, filename: str, data: Any):
-    data_bytes = json.dumps(data, ensure_ascii=False, indent=2).encode('utf-8')
+    try:
+        clean_data = make_json_serializable(data)
+        data_bytes = json.dumps(clean_data, ensure_ascii=False, indent=2).encode('utf-8')
+    except Exception as e:
+        print(f"JSON 직렬화 오류: {e}")
+        return
+
     if is_cloud:
         try:
             dbx.files_upload(data_bytes, f"/{folder_name}/{filename}", mode=dropbox.files.WriteMode("overwrite"))
@@ -309,6 +351,13 @@ if "current_room" not in st.session_state or st.session_state.current_room != se
     st.session_state.messages = load_case_json(selected_folder, use_cloud_storage, "history.json", [])
     st.session_state.timeline_events = load_case_json(selected_folder, use_cloud_storage, "timeline.json", [])
     st.session_state.drafted_docs = load_case_json(selected_folder, use_cloud_storage, "drafts.json", {})
+
+if "editing_idx" not in st.session_state:
+    st.session_state.editing_idx = None
+if "regenerate_trigger" not in st.session_state:
+    st.session_state.regenerate_trigger = False
+if "new_query_trigger" not in st.session_state:
+    st.session_state.new_query_trigger = None
 
 # =====================================================================
 # 5. 헤더 및 4대 전문가 워크스페이스 탭 구성
@@ -334,22 +383,161 @@ tab_chat, tab_timeline, tab_drafter, tab_evidence = st.tabs([
 ])
 
 # =====================================================================
-# TAB 1: 💬 법률 자문 & 팩트체크 파이프라인
+# TAB 1: 💬 법률 자문 & 팩트체크 파이프라인 (제미나이·안티그래비티 모던 UX)
 # =====================================================================
 with tab_chat:
+    # 0. 클립보드 이미지 붙여넣기(Ctrl+V) & 최신 대화 자동 최하단 스크롤 브릿지
+    components.html("""
+    <script>
+    (function() {
+        const parentDoc = window.parent.document;
+        
+        // 1. 최신 대화 위치로 자동 스크롤 (Auto Scroll to Bottom)
+        function smoothScrollToBottom() {
+            const anchor = parentDoc.getElementById('chat-bottom-anchor');
+            if (anchor) {
+                anchor.scrollIntoView({ behavior: 'smooth', block: 'end' });
+            } else {
+                window.parent.window.scrollTo({ top: parentDoc.body.scrollHeight, behavior: 'smooth' });
+            }
+        }
+        setTimeout(smoothScrollToBottom, 150);
+        setTimeout(smoothScrollToBottom, 500);
+
+        // 2. 브라우저 글로벌 클립보드 이미지 붙여넣기 (Ctrl+V) 이벤트 리스너
+        if (window.parent._lawAgentPasteHandler) {
+            parentDoc.removeEventListener('paste', window.parent._lawAgentPasteHandler);
+        }
+        
+        window.parent._lawAgentPasteHandler = function(e) {
+            if (!e.clipboardData || !e.clipboardData.items) return;
+            
+            for (let i = 0; i < e.clipboardData.items.length; i++) {
+                let item = e.clipboardData.items[i];
+                if (item.type.indexOf('image') !== -1) {
+                    let blob = item.getAsFile();
+                    let file = new File([blob], "clipboard_" + Date.now() + ".png", { type: blob.type });
+                    
+                    let fileInputs = parentDoc.querySelectorAll('input[type="file"]');
+                    if (fileInputs && fileInputs.length > 0) {
+                        let targetInput = fileInputs[fileInputs.length - 1];
+                        let dt = new DataTransfer();
+                        dt.items.add(file);
+                        targetInput.files = dt.files;
+                        targetInput.dispatchEvent(new Event('change', { bubbles: true }));
+                        
+                        showToast("📋 캡처 이미지가 입력창에 첨부되었습니다!");
+                    }
+                    break;
+                }
+            }
+        };
+        
+        parentDoc.addEventListener('paste', window.parent._lawAgentPasteHandler);
+        
+        function showToast(msg) {
+            let toast = parentDoc.getElementById('law-agent-toast');
+            if (!toast) {
+                toast = parentDoc.createElement('div');
+                toast.id = 'law-agent-toast';
+                parentDoc.body.appendChild(toast);
+            }
+            toast.innerText = msg;
+            toast.style.cssText = "position: fixed; bottom: 85px; right: 24px; background: #1e3a8a; color: white; padding: 10px 18px; border-radius: 8px; font-size: 13.5px; font-weight: 600; box-shadow: 0 4px 16px rgba(0,0,0,0.18); z-index: 999999; transition: opacity 0.3s ease; opacity: 1;";
+            setTimeout(() => {
+                if (toast) toast.style.opacity = '0';
+            }, 2500);
+        }
+    })();
+    </script>
+    """, height=0, width=0)
+
+    # 상단 대화 비우기 툴바
     col_clear, _ = st.columns([2, 8])
     with col_clear:
         if st.button("🧹 자문 대화 비우기", use_container_width=True):
             st.session_state.messages = []
+            st.session_state.editing_idx = None
+            st.session_state.regenerate_trigger = False
+            st.session_state.new_query_trigger = None
             save_case_json(selected_folder, use_cloud_storage, "history.json", st.session_state.messages)
             st.rerun()
 
-    # 대화 렌더링
+    # 대화 렌더링 (질문 수정, 답변 재생성, 되돌리기 액션 바 포함)
     user_avatar = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Ctext x='12' y='18' font-size='20' text-anchor='middle' fill='white'%3E%E2%9D%94%3C/text%3E%3C/svg%3E"
-    for msg in st.session_state.messages:
-        avatar = user_avatar if msg["role"] == "user" else "⚖️"
+    
+    for idx, msg in enumerate(st.session_state.messages):
+        is_user = (msg["role"] == "user")
+        avatar = user_avatar if is_user else "⚖️"
+        
         with st.chat_message(msg["role"], avatar=avatar):
             st.markdown(msg["content"])
+            
+            # 사용자 첨부 이미지 표시
+            if "images" in msg and msg["images"]:
+                for img_data in msg["images"]:
+                    st.image(img_data, width=320)
+                    
+            # 1) 사용자 메시지: ✏️ 질문 수정 버튼
+            if is_user:
+                c_edit, _ = st.columns([1.8, 8.2])
+                with c_edit:
+                    if st.button("✏️ 질문 수정", key=f"btn_edit_{idx}", help="이 질문을 수정하고 다시 답변을 받습니다."):
+                        st.session_state.editing_idx = idx
+                        st.rerun()
+            else:
+                # 2) 마지막 AI 답변: 🔄 다시 답변 받기(Regenerate) & ↩️ 마지막 대화 취소(Undo)
+                if idx == len(st.session_state.messages) - 1:
+                    c_retry, c_undo, _ = st.columns([2.5, 2.5, 5])
+                    with c_retry:
+                        if st.button("🔄 다시 답변 받기", key="btn_retry_last", help="이 답변을 취소하고 새로운 관점으로 다시 생성합니다."):
+                            st.session_state.regenerate_trigger = True
+                            st.rerun()
+                    with c_undo:
+                        if st.button("↩️ 마지막 대화 취소", key="btn_undo_last", help="마지막 질문과 답변을 대화에서 삭제합니다."):
+                            if len(st.session_state.messages) >= 2:
+                                st.session_state.messages.pop()
+                                st.session_state.messages.pop()
+                            elif len(st.session_state.messages) == 1:
+                                st.session_state.messages.pop()
+                            save_case_json(selected_folder, use_cloud_storage, "history.json", st.session_state.messages)
+                            st.rerun()
+
+    # 질문 수정 모드 인라인 박스
+    if st.session_state.editing_idx is not None and st.session_state.editing_idx < len(st.session_state.messages):
+        target_idx = st.session_state.editing_idx
+        orig_text = st.session_state.messages[target_idx]["content"]
+        
+        with st.container():
+            st.markdown(f"""
+            <div style='background: #f8fafc; border: 1.5px solid #3b82f6; border-radius: 10px; padding: 12px 16px; margin: 12px 0;'>
+                <strong style='color: #1e3a8a;'>✏️ 질문 수정 후 다시 답변 받기 (턴 #{target_idx // 2 + 1})</strong>
+                <p style='font-size: 12.5px; color: #64748b; margin: 4px 0 8px 0;'>질문을 수정하면 이 턴 이후의 대화는 되돌려지고(Undo), 수정된 내용으로 AI가 새 답변을 작성합니다.</p>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            edited_text = st.text_area("수정할 질문:", value=orig_text, height=90, key="edit_prompt_area")
+            c_apply, c_cancel, _ = st.columns([2.5, 2, 5.5])
+            with c_apply:
+                if st.button("🚀 수정하고 다시 질문", type="primary", use_container_width=True):
+                    # 해당 질문 및 이후 답변 일체 롤백
+                    st.session_state.messages = st.session_state.messages[:target_idx]
+                    st.session_state.new_query_trigger = edited_text
+                    st.session_state.editing_idx = None
+                    st.rerun()
+            with c_cancel:
+                if st.button("❌ 수정 취소", use_container_width=True):
+                    st.session_state.editing_idx = None
+                    st.rerun()
+
+    # 최하단 스크롤 앵커 및 팁 배지
+    st.markdown("<div id='chat-bottom-anchor' style='height: 1px;'></div>", unsafe_allow_html=True)
+    st.markdown("""
+    <div style='display: flex; justify-content: space-between; align-items: center; font-size: 12px; color: #64748b; margin-top: 4px; margin-bottom: 8px;'>
+        <span>💡 <strong>Tip:</strong> 캡처 도구(Win+Shift+S)로 복사한 이미지를 입력창에서 <strong>Ctrl+V</strong>로 바로 붙여넣을 수 있습니다.</span>
+        <span>⬆️ 위로 스크롤하면 이전 대화가 보입니다.</span>
+    </div>
+    """, unsafe_allow_html=True)
 
     # Agentic ReAct 리서처 함수들
     def execute_agentic_researcher(user_query_parts, placeholder) -> tuple[str, list]:
@@ -487,33 +675,25 @@ with tab_chat:
             full_response = f"응답 오류 발생: {e}"
         return full_response
 
-    # 사용자 질의 입력
-    prompt = st.chat_input("법률 상담 질문을 입력하거나 증거 사진을 첨부하세요...", accept_file=True)
-    if prompt:
-        user_text = prompt.text if hasattr(prompt, 'text') else prompt
-        attached_files = prompt.files if hasattr(prompt, 'files') else []
-        
+    # 통합 파이프라인 실행 함수 (신규 질문, 질문 수정, 답변 재생성 공통 처리)
+    def run_pipeline_inference(query_text: str, image_list: list):
         user_query_parts = []
-        if user_text:
-            user_query_parts.append(user_text)
+        if query_text:
+            user_query_parts.append(query_text)
             
-        display_images = []
-        for f in attached_files:
-            if f.type.startswith("image"):
-                try:
-                    img = Image.open(f)
-                    user_query_parts.append(img)
-                    display_images.append(img)
-                except Exception as e:
-                    st.error(f"이미지 처리 오류: {e}")
-                    
+        for img in image_list:
+            user_query_parts.append(img)
+            
         with st.chat_message("user", avatar=user_avatar):
-            if user_text:
-                st.markdown(user_text)
-            for img in display_images:
+            if query_text:
+                st.markdown(query_text)
+            for img in image_list:
                 st.image(img, width=320)
                 
-        st.session_state.messages.append({"role": "user", "content": user_text})
+        user_entry = {"role": "user", "content": query_text}
+        if image_list:
+            user_entry["images"] = image_list
+        st.session_state.messages.append(user_entry)
         
         with st.chat_message("assistant", avatar="⚖️"):
             status_placeholder = st.empty()
@@ -523,6 +703,43 @@ with tab_chat:
             
         st.session_state.messages.append({"role": "assistant", "content": final_answer})
         save_case_json(selected_folder, use_cloud_storage, "history.json", st.session_state.messages)
+
+    # 1) '🔄 다시 답변 받기' 트리거 처리
+    if st.session_state.regenerate_trigger:
+        st.session_state.regenerate_trigger = False
+        if st.session_state.messages and st.session_state.messages[-1]["role"] == "assistant":
+            st.session_state.messages.pop() # 이전 답변 제거
+            if st.session_state.messages and st.session_state.messages[-1]["role"] == "user":
+                last_user_entry = st.session_state.messages.pop() # 이전 질문 팝하여 재실행
+                last_text = last_user_entry.get("content", "")
+                last_imgs = last_user_entry.get("images", [])
+                run_pipeline_inference(last_text, last_imgs)
+                st.rerun()
+
+    # 2) '✏️ 질문 수정 후 재질문' 트리거 처리
+    if st.session_state.new_query_trigger:
+        new_q = st.session_state.new_query_trigger
+        st.session_state.new_query_trigger = None
+        run_pipeline_inference(new_q, [])
+        st.rerun()
+
+    # 3) 일반 하단 입력창 처리 (Ctrl+V 클립보드 붙여넣기 및 파일 첨부 지원)
+    prompt = st.chat_input("법률 상담 질문을 입력하거나 증거 이미지를 붙여넣으세요 (Ctrl+V)...", accept_file=True)
+    if prompt:
+        user_text = prompt.text if hasattr(prompt, 'text') else prompt
+        attached_files = prompt.files if hasattr(prompt, 'files') else []
+        
+        display_images = []
+        for f in attached_files:
+            if f.type.startswith("image"):
+                try:
+                    img = Image.open(f)
+                    display_images.append(img)
+                except Exception as e:
+                    st.error(f"이미지 읽기 오류: {e}")
+                    
+        run_pipeline_inference(user_text, display_images)
+        st.rerun()
 
 # =====================================================================
 # TAB 2: 📅 사실관계 타임라인 & 쟁점 연대표
